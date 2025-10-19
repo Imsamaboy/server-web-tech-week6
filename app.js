@@ -9,7 +9,7 @@ const CONTENT_TYPE_TEXT_HEADER = {
   "Content-Type": "text/plain; charset=utf-8",
 };
 
-const LOGIN = "itmo412637";
+const LOGIN = "99803203-b584-4d0c-a62e-0e9704ea6563";
 
 function corsMiddleware(req, res, next) {
   res.set(CORS_HEADERS);
