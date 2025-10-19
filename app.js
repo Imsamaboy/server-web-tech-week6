@@ -1,49 +1,93 @@
-export default function initApp(express, bodyParser, createReadStream, crypto, http) {
-    const app = express();
+// app.js
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,HEAD,OPTIONS,POST,PUT",
+  "Access-Control-Allow-Headers": "*",
+};
 
-    app.use(bodyParser.urlencoded({ extended: true }));
-    app.use(bodyParser.json());
+const CONTENT_TYPE_TEXT_HEADER = {
+  "Content-Type": "text/plain; charset=utf-8",
+};
 
-    app.use((req, res, next) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,OPTIONS,DELETE');
-        if (!req.path.endsWith('/')) {
-            res.redirect(301, req.path + '/');
-        } else {
-            next();
-        }
+const LOGIN = "itmo412637";
+
+function corsMiddleware(req, res, next) {
+  res.set(CORS_HEADERS);
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+}
+
+function readFile(filePath, createReadStream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const stream = createReadStream(filePath);
+
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on("error", (error) => reject(error));
+  });
+}
+
+function getSha1Hash(text, crypto) {
+  return crypto.createHash("sha1").update(text).digest("hex");
+}
+
+function readHttpResponse(response) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    response.on("data", (chunk) => chunks.push(chunk));
+    response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    response.on("error", (error) => reject(error));
+  });
+}
+
+export default function (express, bodyParser, createReadStream, crypto, http) {
+  const app = express();
+
+  app.use(bodyParser.urlencoded({ extended: false }));
+  app.use(bodyParser.json());
+  app.use(corsMiddleware);
+
+  app.get("/login/", (_req, res) => {
+    res.set(CONTENT_TYPE_TEXT_HEADER).send(LOGIN);
+  });
+
+  app.get("/code/", async (_req, res) => {
+    const filePath = import.meta.url.substring(7);
+    const fileContent = await readFile(filePath, createReadStream);
+
+    res.set(CONTENT_TYPE_TEXT_HEADER).send(fileContent);
+  });
+
+  app.get("/sha1/:input/", (req, res) => {
+    const hash = getSha1Hash(req.params.input, crypto);
+
+    res.set(CONTENT_TYPE_TEXT_HEADER).send(hash);
+  });
+
+  app.get("/req/", (req, res) => {
+    http.get(req.query.addr, async (response) => {
+      const data = await readHttpResponse(response);
+
+      res.set(CONTENT_TYPE_TEXT_HEADER).send(data);
     });
+  });
 
-    app.get('/login/', (req, res) => {
-        res.send('99803203-b584-4d0c-a62e-0e9704ea6563');
+  app.post("/req/", (req, res) => {
+    http.get(req.body.addr, async (response) => {
+      const data = await readHttpResponse(response);
+
+      res.set(CONTENT_TYPE_TEXT_HEADER).send(data);
     });
+  });
 
-    app.get('/code/', (req, res) => {
-        const path = decodeURI(import.meta.url.substring(7));
-        createReadStream(path).pipe(res);
-    });
+  app.all(/.*/, (_req, res) => {
+    res.set(CONTENT_TYPE_TEXT_HEADER).send(LOGIN);
+  });
 
-    app.get('/sha1/:input/', (req, res) => {
-        const hash = crypto.createHash('sha1').update(req.params.input).digest('hex');
-        res.send(hash);
-    });
-
-    app.all(['/req/', '/req'], (req, res) => {
-        const addr = req.method === 'GET' ? req.query.addr : req.body.addr;
-        if (!addr) {
-            res.status(400).send('addr parameter is required');
-            return;
-        }
-        http.get(addr, (resp) => {
-            resp.pipe(res);
-        }).on('error', () => {
-            res.status(500).send('Error fetching resource');
-        });
-    });
-
-    app.all(/.*/, (req, res) => {
-        res.send('99803203-b584-4d0c-a62e-0e9704ea6563');
-    });
-
-    return app;
+  return app;
 }
