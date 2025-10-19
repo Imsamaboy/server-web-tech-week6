@@ -21,31 +21,7 @@ function corsMiddleware(req, res, next) {
   next();
 }
 
-function readFile(filePath, createReadStream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    const stream = createReadStream(filePath);
-
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    stream.on("error", (error) => reject(error));
-  });
-}
-
-function getSha1Hash(text, crypto) {
-  return crypto.createHash("sha1").update(text).digest("hex");
-}
-
-function readHttpResponse(response) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    response.on("data", (chunk) => chunks.push(chunk));
-    response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    response.on("error", (error) => reject(error));
-  });
-}
-
-export default function (express, bodyParser, createReadStream, crypto, http) {
+export default function (express, bodyParser, mongodb) {
   const app = express();
 
   app.use(bodyParser.urlencoded({ extended: false }));
@@ -56,33 +32,28 @@ export default function (express, bodyParser, createReadStream, crypto, http) {
     res.set(CONTENT_TYPE_TEXT_HEADER).send(LOGIN);
   });
 
-  app.get("/code/", async (_req, res) => {
-    const filePath = import.meta.url.substring(7);
-    const fileContent = await readFile(filePath, createReadStream);
+  app.post("/insert/", async (req, res) => {
+    const { login, password, URL } = req.body;
 
-    res.set(CONTENT_TYPE_TEXT_HEADER).send(fileContent);
-  });
+    let client;
 
-  app.get("/sha1/:input/", (req, res) => {
-    const hash = getSha1Hash(req.params.input, crypto);
+    try {
+      client = await mongodb.MongoClient.connect(URL, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
 
-    res.set(CONTENT_TYPE_TEXT_HEADER).send(hash);
-  });
+      const db = client.db("readusers");
+      const collection = db.collection("users");
 
-  app.get("/req/", (req, res) => {
-    http.get(req.query.addr, async (response) => {
-      const data = await readHttpResponse(response);
+      await collection.insertOne({ login, password });
 
-      res.set(CONTENT_TYPE_TEXT_HEADER).send(data);
-    });
-  });
-
-  app.post("/req/", (req, res) => {
-    http.get(req.body.addr, async (response) => {
-      const data = await readHttpResponse(response);
-
-      res.set(CONTENT_TYPE_TEXT_HEADER).send(data);
-    });
+      res.status(201).send("User created");
+    } catch (error) {
+      res.status(500).send("Error inserting user:", error);
+    } finally {
+      await client?.close();
+    }
   });
 
   app.all(/.*/, (_req, res) => {
