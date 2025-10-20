@@ -1,5 +1,7 @@
 export default function appSrc(express, bodyParser, createReadStream, crypto, http, mongo, https, pug, puppeteer) {
   const app = express();
+  const LOGIN = "99803203-b584-4d0c-a62e-0e9704ea6563";
+
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -9,6 +11,7 @@ export default function appSrc(express, bodyParser, createReadStream, crypto, ht
     res.setHeader('Access-Control-Allow-Headers', 'x-test,ngrok-skip-browser-warning,Content-Type,Accept,Access-Control-Allow-Headers');
     next();
   });
+
   app.use((req, res, next) => {
     const start = Date.now();
     const bodyStr = req.body && Object.keys(req.body).length ? JSON.stringify(req.body) : '';
@@ -19,10 +22,11 @@ export default function appSrc(express, bodyParser, createReadStream, crypto, ht
     });
     next();
   });
-  app.get('/login/', (req, res) => {
-    res.set('Content-Type', 'text/plain; charset=UTF-8');
 
+  app.get("/login/", (_req, res) => {
+    res.set('Content-Type', 'text/plain; charset=UTF-8').send(LOGIN);
   });
+
   app.get('/code/', (req, res) => {
     res.set('Content-Type', 'text/plain; charset=UTF-8');
     const filepath = import.meta.url.substring(7);
