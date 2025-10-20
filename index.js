@@ -12,4 +12,4 @@ import appSrc from './app.js';
 
 const app = appSrc(express, bodyParser, createReadStream, crypto, http, mongo, https, pug, puppeteer);
 
-app.listen(process.env.PORT || 3000);
+app.listen(process.env.PORT);
