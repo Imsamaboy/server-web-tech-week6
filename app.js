@@ -1,174 +1,182 @@
-// app.js
-export default function appSrc(express, bodyParser, createReadStream, crypto, http, mongo, https, pug, puppeteer) {
+import https from "https";
+import { fileURLToPath } from "url";
+import { createProxyMiddleware } from "http-proxy-middleware";
+
+// const __filename = fileURLToPath(import.meta.url);
+
+export default (express, bodyParser, createReadStream, crypto, http, MongoClient, pug) => {
   const app = express();
 
-  const CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,HEAD,OPTIONS,POST,PUT",
-    "Access-Control-Allow-Headers": "*",
+  const SYSTEM_LOGIN = "99803203-b584-4d0c-a62e-0e9704ea6563";
+  const TEXT_PLAIN_HEADER = { "Content-Type": "text/plain; charset=utf-8" };
+
+
+  const readHttpResponse = (response) => {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      response.on("error", (err) => reject(err));
+    });
   };
 
-  const CONTENT_TYPE_TEXT_HEADER = {
-    "Content-Type": "text/plain; charset=utf-8",
+  const fetchUrlData = (url) => {
+    return new Promise((resolve, reject) => {
+      const aget = url.startsWith('https://') ? https.get : http.get;
+      aget(url, async (response) => {
+        try {
+          const data = await readHttpResponse(response);
+          resolve(data);
+        } catch (err) {
+          reject(err);
+        }
+      }).on("error", reject);
+    });
   };
 
-  const LOGIN = "99803203-b584-4d0c-a62e-0e9704ea6563";
+
+  app.use((req, res, next) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,OPTIONS,DELETE");
+    res.set("X-Author", SYSTEM_LOGIN)
+
+
+    res.set(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, ngrok-skip-browser-warning,Access-Control-Allow-Headers, x-test"
+    );
+
+
+
+
+    if (req.method === 'OPTIONS') {
+
+      return res.sendStatus(204);
+    }
+
+    next();
+  });
+
 
   app.use(bodyParser.json());
-  app.use(bodyParser.urlencoded({ extended: true }));
-  app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,OPTIONS,DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'x-test,ngrok-skip-browser-warning,Content-Type,Accept,Access-Control-Allow-Headers');
-    next();
+
+
+  const wordpressBaseUrl = process.env.WORDPRESS_URL || 'https://example.com';
+
+  if (wordpressBaseUrl) {
+    app.use('/wordpress', createProxyMiddleware({
+      target: wordpressBaseUrl,
+      changeOrigin: true,
+      pathRewrite: {
+        '^/wordpress': '',
+      },
+
+
+      onProxyRes: function (proxyRes, req, res) {
+        proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, OPTIONS, DELETE';
+        proxyRes.headers['Access-Control-Allow-Origin'] = '*';
+        proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, ngrok-skip-browser-warning';
+        proxyRes.headers['X-Author'] = SYSTEM_LOGIN
+      },
+
+
+      onError: (err, req, res) => {
+        console.error('Ошибка прокси:', err);
+        res.status(500).set(TEXT_PLAIN_HEADER).send('Ошибка прокси-сервера: ' + err.message);
+      }
+    }));
+  }
+
+  app.get("/login/", (_req, res) => {
+    res.set(TEXT_PLAIN_HEADER).send(SYSTEM_LOGIN);
   });
 
-  app.use((req, res, next) => {
-    const start = Date.now();
-    const bodyStr = req.body && Object.keys(req.body).length ? JSON.stringify(req.body) : '';
-    res.on('finish', () => {
-      const durationMs = Date.now() - start;
-      const length = res.getHeader('content-length') ?? '-';
-      console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${length} - ${durationMs}ms ${bodyStr}`);
-    });
-    next();
+  // app.get("/code/", (_req, res) => {
+  //     res.set(TEXT_PLAIN_HEADER);
+  //     const stream = createReadStream(__filename);
+  //     stream.on("error", (err) => res.status(500).send(err.toString()));
+  //     stream.pipe(res);
+  // });
+
+  app.get("/sha1/:input/", (req, res) => {
+    const hash = crypto.createHash("sha1").update(req.params.input).digest("hex");
+    res.set(TEXT_PLAIN_HEADER).send(hash);
   });
 
-  app.get('/login/', (req, res) => {
-    res.set('Content-Type', 'text/plain; charset=UTF-8').send(LOGIN);
-  });
-
-  app.get('/code/', (req, res) => {
-    res.set('Content-Type', 'text/plain; charset=UTF-8');
-    const filepath = import.meta.url.substring(7);
-    const stream = createReadStream(filepath);
-    stream.on('error', () => res.status(500).end());
-    stream.pipe(res);
-  });
-
-  app.get('/sha1/:input/', (req, res) => {
-    const { input } = req.params;
-    const hash = crypto.createHash('sha1').update(input).digest('hex');
-    res.send(hash);
-  });
-
-  app.get('/req/', (req, res) => {
-    const addr = typeof req.query.addr === 'string' ? req.query.addr : undefined;
-    if (!addr) return res.status(400).send('Bad Request');
-    http
-        .get(addr, (r) => {
-          if (r.statusCode) res.status(r.statusCode);
-          r.on('error', () => res.status(502).end());
-          r.pipe(res);
-        })
-        .on('error', () => res.status(502).end());
-  });
-
-  app.post('/req/', (req, res) => {
-    const addr = typeof req.body?.addr === 'string' ? req.body.addr : undefined;
-    if (!addr) return res.status(400).send('Bad Request');
-    http
-        .get(addr, (r) => {
-          if (r.statusCode) res.status(r.statusCode);
-          r.on('error', () => res.status(502).end());
-          r.pipe(res);
-        })
-        .on('error', () => res.status(502).end());
-  });
-
-  app.post('/insert/', async (req, res) => {
-    const login = req.body.login;
-    const password = req.body.password;
-    const URL = req.body.URL;
-    if (!login || !password || !URL || !mongo) return res.status(400).send('Bad Request');
-    let client;
+  app.get("/req/", async (req, res) => {
+    const addr = req.query.addr;
+    if (!addr) return res.status(400).set(TEXT_PLAIN_HEADER).send("Missing addr query parameter");
     try {
-      client = await new mongo.MongoClient(URL, { useNewUrlParser: true, useUnifiedTopology: true }).connect();
-      const db = client.db();
-      const users = db.collection('users');
-      await users.insertOne({ login, password });
-      res.status(201).send('OK');
+      const data = await fetchUrlData(addr);
+      res.set(TEXT_PLAIN_HEADER).send(data);
     } catch (err) {
-      res.status(500).send('Server Error' + err.message);
+      res.status(500).set(TEXT_PLAIN_HEADER).send(err.toString());
+    }
+  });
+
+  app.post("/req/", async (req, res) => {
+    const addr = req.body.addr;
+    if (!addr) return res.status(400).set(TEXT_PLAIN_HEADER).send("Missing addr in body");
+    try {
+      const data = await fetchUrlData(addr);
+      res.set(TEXT_PLAIN_HEADER).send(data);
+    } catch (err) {
+      res.status(500).set(TEXT_PLAIN_HEADER).send(err.toString());
+    }
+  });
+
+  app.post("/insert/", async (req, res) => {
+    const { login, password, URL: mongoUrl } = req.body;
+    if (!login || !password || !mongoUrl) return res.status(400).set(TEXT_PLAIN_HEADER).send("Error: 'login', 'password', and 'URL' are required in the body.");
+    const client = new MongoClient(mongoUrl, { useNewUrlParser: true, useUnifiedTopology: true });
+    try {
+      await client.connect();
+      const db = client.db();
+      const collection = db.collection("users");
+      const doc = { login, password };
+      await collection.insertOne(doc);
+      res.set(TEXT_PLAIN_HEADER).status(201).send("User created successfully.");
+    } catch (err) {
+      res.status(500).set(TEXT_PLAIN_HEADER).send(err.toString());
     } finally {
       if (client) await client.close();
     }
   });
 
-  app.get('/test/', async (req, res) => {
-    const target = req.query.URL;
-    if (!target || !puppeteer) return res.status(400).send('Bad Request');
-    let browser;
+
+  app.post("/render/", async (req, res) => {
+    const { addr } = req.query;
+
+    if (!addr) {
+      return res.status(400).set(TEXT_PLAIN_HEADER).send("Missing addr query parameter");
+    }
+
+    if (!req.body) {
+      console.error("ОШИБКА: req.body не определен!");
+      return res.status(500).set(TEXT_PLAIN_HEADER).send("Server config error: req.body is undefined.");
+    }
+
+    const { random2, random3 } = req.body;
+
+    if (random2 === undefined || random3 === undefined) {
+      console.error("ОШИБКА: random2 или random3 не найдены в req.body. Получено:", JSON.stringify(req.body));
+      return res.status(400).set(TEXT_PLAIN_HEADER).send("Missing random2 or random3 in JSON body");
+    }
+
     try {
-      browser = await puppeteer.launch({
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
-        args: ['--no-sandbox', '--disable-dev-shm-usage']
-      });
-      const page = await browser.newPage();
-      await page.goto(target, { waitUntil: 'networkidle2' });
-      await page.click('#bt');
-      const value = await page.$eval('#inp', (el) => el.value || '');
-      res.set('Content-Type', 'text/plain; charset=UTF-8');
-      res.send(String(value ?? ''));
+      const templateString = await fetchUrlData(addr);
+      const compiledTemplate = pug.compile(templateString);
+      const html = compiledTemplate({ random2, random3 });
+      res.status(200).set("Content-Type", "text/html; charset=utf-8").send(html);
     } catch (err) {
-      res.status(500).send('Server Error');
-    } finally {
-      if (browser) await browser.close();
+      res.status(500).set(TEXT_PLAIN_HEADER).send(err.toString());
     }
   });
 
-  app.use('/wordpress/', (req, res) => {
-    const base = process.env.WORDPRESS_BASE;
-    const target = new URL(req.url, base).toString();
-
-    const proxyReq = http.get(target, (r) => {
-      res.statusCode = r.statusCode || 502;
-      if (r.headers['content-type']) {
-        res.setHeader('Content-Type', r.headers['content-type']);
-      }
-      r.pipe(res);
-    });
-
-    proxyReq.on('error', (err) => {
-      console.error('Proxy error:', err.message);
-      res.status(502).end();
-    });
+  app.all(/.*/, (_req, res) => {
+    res.set(TEXT_PLAIN_HEADER).send(SYSTEM_LOGIN);
   });
-
-  app.post('/render/', (req, res) => {
-    const addr = typeof req.query.addr === 'string' ? req.query.addr : undefined;
-    const { random2, random3 } = req.body || {};
-    if (!addr || !pug) return res.status(400).send('Bad Request');
-    const isHttps = addr.startsWith('https');
-    const client = isHttps && https ? https : http;
-    const fetchReq = client.get(addr, (r) => {
-      if (r.statusCode && r.statusCode >= 400) return res.status(r.statusCode).end();
-      let data = '';
-      r.setEncoding('utf8');
-      r.on('data', (chunk) => { data += chunk; });
-      r.on('end', () => {
-        try {
-          const tpl = pug.compile(data);
-          const html = tpl({ random2, random3 });
-          res.set('Content-Type', 'text/html; charset=UTF-8');
-          res.send(html);
-        } catch (_) {
-          res.status(500).send('Server Error');
-        }
-      });
-    });
-    fetchReq.on('error', () => res.status(502).end());
-  });
-
-  app.use((err, req, res, next) => {
-    console.error(err && err.stack ? err.stack : err);
-    if (res.headersSent) return next(err);
-    res.status(500).send('Internal Server Error');
-  });
-
-  app.all(/.*/,(req, res) => {
-    res.set(CONTENT_TYPE_TEXT_HEADER).send(LOGIN);
-  })
 
   return app;
-}
+
+};
