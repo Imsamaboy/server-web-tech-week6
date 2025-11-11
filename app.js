@@ -57,9 +57,9 @@ export default (express, bodyParser, createReadStream, crypto, http, MongoClient
     next();
   });
 
-
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
   app.use(bodyParser.json());
-
 
   const wordpressBaseUrl = process.env.WORDPRESS_URL || 'https://example.com';
 
